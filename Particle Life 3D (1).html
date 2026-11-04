@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Particle Life 3D</title>
+<style>
+:root{--bg:#eef1f4;--panel:#fbfcfd;--fg:#14202b;--mut:#5d6b78;--line:#d3dae1;--acc:#2f6aa3;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0a141d;--panel:#101e2a;--fg:#e4ecf3;--mut:#8fa2b3;--line:#22364a;--acc:#6aa9e0}}
+:root[data-theme="dark"]{--bg:#0a141d;--panel:#101e2a;--fg:#e4ecf3;--mut:#8fa2b3;--line:#22364a;--acc:#6aa9e0}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font:15px/1.4 "Iowan Old Style",Georgia,serif}
+#app{height:100%;display:flex;flex-direction:column}
+header{padding:10px 14px 8px;background:var(--panel);border-bottom:1px solid var(--line)}
+.top{display:flex;gap:10px;align-items:center;justify-content:space-between}
+h1{font-size:20px;margin:0;font-weight:600}
+#about{color:var(--mut);font-size:13px;margin-top:2px}
+#wrap{flex:1;min-height:0;position:relative}
+canvas{position:absolute;inset:0;width:100%;height:100%;display:block;background:#07111a;touch-action:none;cursor:grab}
+#ctl{background:var(--panel);border-top:1px solid var(--line);padding:8px 14px;display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:6px 14px;font-size:13px;max-height:44%;overflow:auto}
+label{display:flex;flex-direction:column;gap:2px;color:var(--mut)}
+label b{color:var(--fg);font-weight:600}
+input[type=range]{width:100%;accent-color:var(--acc)}
+select,button,input.t{font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:5px 8px}
+button{cursor:pointer}button:hover{border-color:var(--acc)}
+#btns{display:flex;gap:6px;flex-wrap:wrap;align-items:end}
+#mx{display:grid;gap:2px;width:max-content}
+#mx button{width:24px;height:24px;padding:0;border-radius:4px}
+#mx i{width:24px;height:24px;display:flex;align-items:center;justify-content:center}
+#mx i s{width:10px;height:10px;border-radius:50%}
+#fsbar{display:none;position:absolute;right:10px;bottom:10px;gap:6px}
+#fsbar button{background:rgba(16,30,42,.82);color:#e4ecf3;border-color:#2a4157}
+body.fs header,body.fs #ctl{display:none}
+body.fs #fsbar{display:flex}
+:focus-visible{outline:2px solid var(--acc);outline-offset:1px}
+</style>
+</head>
+<body>
+<div id="app">
+<header>
+<div class="top"><h1>Particle life 3D</h1><button id="auto">Auto-rotate: on</button></div>
+<div id="about">Drag to rotate, pinch or scroll to zoom. Same rules as the 2D version, inside a wrap-around cube; near particles are brighter and larger.</div>
+</header>
+<div id="wrap"><canvas id="c"></canvas><div id="fsbar"><button id="fsa">Auto-rotate</button><button id="fsp">Pause</button><button id="fsx">Exit full screen</button></div></div>
+<div id="ctl">
+<div id="sl" style="display:contents"></div>
+<div id="extra"></div>
+<div id="btns"><button id="pause">Pause</button><button id="restart">Restart</button><button id="fs">Full screen</button><button id="rnd">New rules</button>
+<select id="pre" aria-label="Rule presets"><option value="">Presets…</option><option value="galaxy">Spinning disk</option><option value="swim">Swimmers</option><option value="cell">Core &amp; shell cell</option><option value="collide">Two bodies colliding</option><option value="breath">Breathing blob</option><option value="saved1">Comets &amp; rings (2D rules)</option><option value="cyc">Cyclic chase</option><option value="chain">Chains</option><option value="clump">Clumps</option><option value="sym">Symmetric (crystals)</option></select>
+<select id="lay" aria-label="Start layout"><option value="random">Start: random cube</option><option value="ball">Start: ball</option><option value="shell">Start: shell</option><option value="two">Start: two clusters</option><option value="layers">Start: layers</option><option value="galaxy">Start: spinning disk</option><option value="ring">Start: ring</option></select><button id="mut">Mutate</button><input id="code" class="t" aria-label="Rule code" style="width:140px"><button id="load">Load</button></div>
+</div>
+</div>
+<script>
+const $=id=>document.getElementById(id);
+const cv=$('c'),ctx=cv.getContext('2d'),rnd=Math.random;
+const L=400,CZ=900,HM=41;
+let LAY='random',W=1,H=1,dpr=1,K=5,M=null,S={},paused=false,auto=true,yaw=.6,pitch=.35,vyaw=0,vpitch=0,zoom=1,drag=false;
+const CFG=[['n','Particles',200,2500,50,1050],['K','Species',2,7,1,5],['rmax','Reach',30,130,1,76],['force','Force',.5,10,.1,8.4],['fr','Friction kept',.5,.95,.01,.73],['beta','Core size',.1,.6,.01,.29],['size','Particle size',.3,3,.1,1],['trail','Trail length',0,40,1,12],['grav','Central gravity',0,2,.05,0],['vth','Burst speed',1,15,.5,5],['vib','Vibration',0,2,.05,.3],['vmax','Speed limit',1,20,.5,10],['ff','Time speed ×',1,10,1,1]];
+const P={};CFG.forEach(c=>P[c[0]]=c[5]);
+const SAVED=[0,-1,.5,1,-.5, 1,-1,.5,.5,1, 1,-.5,-.5,1,.5, .5,-1,-.5,-.5,.5, .5,1,1,.5,-1];
+const col=k=>'hsl('+(360*k/K|0)+',80%,62%)';
+
+function sliders(){const el=$('sl');el.innerHTML='';
+ CFG.forEach(([k,lab,mn,mx,st])=>{const l=document.createElement('label');
+  l.innerHTML='<span>'+lab+' <b>'+P[k]+'</b></span><input type="range" min="'+mn+'" max="'+mx+'" step="'+st+'" value="'+P[k]+'">';
+  const i=l.querySelector('input'),b=l.querySelector('b');
+  i.oninput=()=>{P[k]=+i.value;b.textContent=i.value;if(k==='n'||k==='K')init()};el.appendChild(l)})}
+const randM=()=>{M=new Float32Array(K*K);const v=[-1,-.5,0,.5,1];for(let i=0;i<K*K;i++)M[i]=v[(rnd()*5)|0]};
+const enc=()=>K+':'+Array.from(M,v=>v*2).join(',');
+function paint(b,v){b.style.background=v>0?'rgba(70,150,255,'+v+')':v<0?'rgba(255,90,90,'+(-v)+')':'transparent'}
+function matrixUI(){const ex=$('extra');ex.innerHTML='<div style="color:var(--mut)">Row is pulled by column: blue attracts, red repels</div>';
+ const g=document.createElement('div');g.id='mx';g.style.gridTemplateColumns='repeat('+(K+1)+',24px)';g.appendChild(document.createElement('i'));
+ for(let c=0;c<K;c++)g.insertAdjacentHTML('beforeend','<i><s style="background:'+col(c)+'"></s></i>');
+ for(let r=0;r<K;r++){g.insertAdjacentHTML('beforeend','<i><s style="background:'+col(r)+'"></s></i>');
+  for(let c=0;c<K;c++){const b=document.createElement('button');b.setAttribute('aria-label','species '+r+' by '+c);paint(b,M[r*K+c]);
+   b.onclick=()=>{const v=[-1,-.5,0,.5,1];M[r*K+c]=v[(v.indexOf(M[r*K+c])+1)%5];paint(b,M[r*K+c]);$('code').value=enc()};g.appendChild(b)}}
+ ex.appendChild(g);$('code').value=enc()}
+function init(){
+ K=P.K|0;if(!M||M.length!==K*K)randM();const n=P.n|0;
+ S={x:new Float32Array(n),y:new Float32Array(n),z:new Float32Array(n),vx:new Float32Array(n),vy:new Float32Array(n),vz:new Float32Array(n),t:new Uint8Array(n),
+  sx:new Float32Array(n),sy:new Float32Array(n),sz:new Float32Array(n),ss:new Float32Array(n),ord:new Uint32Array(n),hist:new Float32Array(HM*n*3),hp:0,hn:0};
+ for(let i=0;i<n;i++)S.ord[i]=i;
+ place();matrixUI()}
+function place(){
+ const {x,y,z,vx,vy,vz,t}=S,n=x.length,c=L/2,TAU=6.2832;
+ for(let i=0;i<n;i++){
+  const u=rnd()*2-1,a=rnd()*TAU,q=Math.sqrt(1-u*u);let X,Y,Z,VX=0,VY=0,VZ=0;t[i]=(rnd()*K)|0;
+  if(LAY==='ball'){const r=.27*L*Math.cbrt(rnd());X=c+r*q*Math.cos(a);Y=c+r*q*Math.sin(a);Z=c+r*u}
+  else if(LAY==='shell'){const r=.3*L*(1+.04*(rnd()-.5));X=c+r*q*Math.cos(a);Y=c+r*q*Math.sin(a);Z=c+r*u}
+  else if(LAY==='two'){const sg=i%2?1:-1,r=.13*L*Math.cbrt(rnd());X=c+sg*.26*L+r*q*Math.cos(a);Y=c+r*q*Math.sin(a);Z=c+r*u;VX=-sg*1.2}
+  else if(LAY==='layers'){X=rnd()*L;Y=rnd()*L;Z=c+((t[i]+.5)/K-.5)*.7*L+(rnd()-.5)*.03*L}
+  else if(LAY==='galaxy'){const r=.36*L*Math.sqrt(rnd()),th=rnd()*TAU,v=1.2*r/(.36*L);X=c+r*Math.cos(th);Y=c+r*Math.sin(th);Z=c+(rnd()-.5)*.05*L;VX=-Math.sin(th)*v;VY=Math.cos(th)*v}
+  else if(LAY==='ring'){const th=rnd()*TAU,r=.3*L+(rnd()-.5)*.06*L;X=c+r*Math.cos(th);Y=c+r*Math.sin(th);Z=c+(rnd()-.5)*.06*L}
+  else{X=rnd()*L;Y=rnd()*L;Z=rnd()*L}
+  x[i]=(X%L+L)%L;y[i]=(Y%L+L)%L;z[i]=(Z%L+L)%L;vx[i]=VX;vy[i]=VY;vz[i]=VZ}}
+
+function step(){
+ const {x,y,z,vx,vy,vz,t}=S,n=x.length,rm=P.rmax,rm2=rm*rm,bt=P.beta,cols=Math.max(3,Math.floor(L/rm)),cw=L/cols,c2=cols*cols;
+ const head=new Int32Array(c2*cols).fill(-1),nxt=new Int32Array(n),cc=new Int32Array(n),ci=v=>Math.min(cols-1,(v/cw)|0);
+ for(let i=0;i<n;i++){const c=ci(x[i])+cols*ci(y[i])+c2*ci(z[i]);cc[i]=c;nxt[i]=head[c];head[c]=i}
+ for(let i=0;i<n;i++){let fx=0,fy=0,fz=0;const c=cc[i],cx=c%cols,cy=((c/cols)|0)%cols,cz=(c/c2)|0,row=t[i]*K;
+  for(let a=-1;a<=1;a++){const gx=(cx+a+cols)%cols;for(let b=-1;b<=1;b++){const gy=(cy+b+cols)%cols;for(let e=-1;e<=1;e++){const gz=(cz+e+cols)%cols;
+   for(let j=head[gx+cols*gy+c2*gz];j>=0;j=nxt[j]){if(j===i)continue;
+    let dx=x[j]-x[i],dy=y[j]-y[i],dz=z[j]-z[i];dx-=L*Math.round(dx/L);dy-=L*Math.round(dy/L);dz-=L*Math.round(dz/L);
+    const d2=dx*dx+dy*dy+dz*dz;if(d2>=rm2||d2<1e-6)continue;
+    const r=Math.sqrt(d2),rn=r/rm,f=rn<bt?rn/bt-1:M[row+t[j]]*(1-Math.abs(2*rn-1-bt)/(1-bt));
+    fx+=f*dx/r;fy+=f*dy/r;fz+=f*dz/r}}}}
+  const k=P.force*.05;vx[i]=vx[i]*P.fr+fx*k;vy[i]=vy[i]*P.fr+fy*k;vz[i]=vz[i]*P.fr+fz*k;vx[i]-=(x[i]-L/2)/L*P.grav;vy[i]-=(y[i]-L/2)/L*P.grav;vz[i]-=(z[i]-L/2)/L*P.grav;const sp2=Math.hypot(vx[i],vy[i],vz[i]);if(sp2>P.vth){const u=rnd()*2-1,a=rnd()*6.2832,q=Math.sqrt(1-u*u),m=P.vib*sp2;vx[i]+=q*Math.cos(a)*m;vy[i]+=q*Math.sin(a)*m;vz[i]+=u*m}const sp3=Math.hypot(vx[i],vy[i],vz[i]);if(sp3>P.vmax){const q=P.vmax/sp3;vx[i]*=q;vy[i]*=q;vz[i]*=q}}
+ const hs=S.hist,hb=S.hp*n*3;
+ for(let i=0;i<n;i++){x[i]=((x[i]+vx[i])%L+L)%L;y[i]=((y[i]+vy[i])%L+L)%L;z[i]=((z[i]+vz[i])%L+L)%L;hs[hb+i*3]=x[i];hs[hb+i*3+1]=y[i];hs[hb+i*3+2]=z[i]}
+ S.hp=(S.hp+1)%HM;S.hn=Math.min(HM,S.hn+1)}
+
+const EDGES=[[0,1],[2,3],[4,5],[6,7],[0,2],[1,3],[4,6],[5,7],[0,4],[1,5],[2,6],[3,7]];
+function draw(){
+ ctx.setTransform(dpr,0,0,dpr,0,0);ctx.fillStyle='#07111a';ctx.fillRect(0,0,W,H);
+ const cyw=Math.cos(yaw),syw=Math.sin(yaw),cp=Math.cos(pitch),sp=Math.sin(pitch),f=.4*Math.min(W,H)*CZ/200*zoom,ox=W/2,oy=H/2,h=L/2;
+ const pr=(X,Y,Z)=>{const x1=X*cyw+Z*syw,z1=-X*syw+Z*cyw,y2=Y*cp-z1*sp,z2=Y*sp+z1*cp,s=f/(CZ+z2);return[ox+x1*s,oy+y2*s,z2,s]};
+ const cs=[];for(let i=0;i<8;i++)cs.push(pr(i&1?h:-h,i&2?h:-h,i&4?h:-h));
+ ctx.strokeStyle='rgba(150,190,230,.22)';ctx.lineWidth=1;ctx.beginPath();
+ for(const [a,b] of EDGES){ctx.moveTo(cs[a][0],cs[a][1]);ctx.lineTo(cs[b][0],cs[b][1])}ctx.stroke();
+ const TL=Math.min(P.trail|0,S.hn-1);
+ if(TL>0){const hs=S.hist,n0=S.x.length,hp=S.hp,tt=S.t;ctx.lineWidth=Math.max(.6,.9*Math.min(1.4,zoom));ctx.lineCap='round';
+  const slot=s=>((hp-1-s+HM*2)%HM)*n0*3;let PX=0,PY=0;
+  const pj=o=>{const X=hs[o]-h,Y=hs[o+1]-h,Z=hs[o+2]-h,x1=X*cyw+Z*syw,z1=-X*syw+Z*cyw,y2=Y*cp-z1*sp,z2=Y*sp+z1*cp,s=f/(CZ+z2);PX=ox+x1*s;PY=oy+y2*s};
+  const segs=[[0,TL/3,.55],[TL/3,2*TL/3,.3],[2*TL/3,TL,.14]];
+  for(let k=0;k<K;k++){ctx.strokeStyle=col(k);
+   for(const [g0,g1,al] of segs){ctx.globalAlpha=al;ctx.beginPath();
+    for(let i=0;i<n0;i++){if(tt[i]!==k)continue;
+     for(let s=Math.floor(g0);s<Math.ceil(g1)&&s<TL;s++){const o1=slot(s)+i*3,o2=slot(s+1)+i*3;
+      if(Math.abs(hs[o1]-hs[o2])>200||Math.abs(hs[o1+1]-hs[o2+1])>200||Math.abs(hs[o1+2]-hs[o2+2])>200)continue;
+      pj(o1);const x1=PX,y1=PY;pj(o2);ctx.moveTo(x1,y1);ctx.lineTo(PX,PY)}}
+    ctx.stroke()}}
+  ctx.globalAlpha=1}
+ const {x,y,z,t,sx,sy,sz,ss,ord}=S,n=x.length;
+ for(let i=0;i<n;i++){const X=x[i]-h,Y=y[i]-h,Z=z[i]-h,x1=X*cyw+Z*syw,z1=-X*syw+Z*cyw,y2=Y*cp-z1*sp,z2=Y*sp+z1*cp,s=f/(CZ+z2);
+  sx[i]=ox+x1*s;sy[i]=oy+y2*s;sz[i]=z2;ss[i]=s}
+ ord.sort((a,b)=>sz[b]-sz[a]);
+ const cols=[];for(let k=0;k<K;k++)cols.push(col(k));
+ for(let q=0;q<n;q++){const i=ord[q],a=Math.max(.3,Math.min(1,.35+.65*(1-(sz[i]+350)/700)));
+  ctx.globalAlpha=a;ctx.fillStyle=cols[t[i]];ctx.beginPath();ctx.arc(sx[i],sy[i],Math.max(.7,2.4*P.size*ss[i]),0,6.2832);ctx.fill()}
+ ctx.globalAlpha=1}
+
+function frame(){
+ if(!drag){yaw+=vyaw+(auto?.003:0);pitch=Math.max(-1.55,Math.min(1.55,pitch+vpitch));vyaw*=.94;vpitch*=.94}
+ if(!paused){const t0=performance.now();let k=0;do{step();k++}while(k<P.ff&&performance.now()-t0<22)}
+ draw();requestAnimationFrame(frame)}
+function resize(){dpr=Math.min(window.devicePixelRatio||1,2);const w=cv.clientWidth,h=cv.clientHeight;if(!w||!h)return;W=w;H=h;cv.width=W*dpr;cv.height=H*dpr}
+
+const ptrs=new Map();
+cv.addEventListener('pointerdown',e=>{cv.setPointerCapture(e.pointerId);ptrs.set(e.pointerId,{x:e.clientX,y:e.clientY});drag=true;vyaw=vpitch=0});
+cv.addEventListener('pointermove',e=>{const p=ptrs.get(e.pointerId);if(!p)return;
+ if(ptrs.size===1){const dx=e.clientX-p.x,dy=e.clientY-p.y;yaw-=dx*.008;pitch=Math.max(-1.55,Math.min(1.55,pitch+dy*.008));vyaw=-dx*.008;vpitch=dy*.008}
+ else if(ptrs.size===2){const o=[...ptrs.entries()].find(([id])=>id!==e.pointerId)[1];
+  const d0=Math.hypot(p.x-o.x,p.y-o.y)||1,d1=Math.hypot(e.clientX-o.x,e.clientY-o.y);zoom=Math.max(.4,Math.min(4,zoom*d1/d0));vyaw=vpitch=0}
+ p.x=e.clientX;p.y=e.clientY});
+const up=e=>{ptrs.delete(e.pointerId);if(!ptrs.size)drag=false};
+cv.addEventListener('pointerup',up);cv.addEventListener('pointercancel',up);
+cv.addEventListener('wheel',e=>{e.preventDefault();zoom=Math.max(.4,Math.min(4,zoom*Math.exp(-e.deltaY*.001)))},{passive:false});
+
+const PRE={
+ cyc(){M.fill(0);for(let i=0;i<K;i++){M[i*K+i]=.5;M[i*K+(i+1)%K]=1;M[i*K+(i+K-1)%K]=-1}},
+ sym(){const v=[-1,-.5,0,.5,1];for(let i=0;i<K;i++)for(let j=i;j<K;j++)M[i*K+j]=M[j*K+i]=v[(rnd()*5)|0]},
+ clump(){M.fill(0);for(let i=0;i<K;i++)for(let j=0;j<K;j++)M[i*K+j]=i===j?1:(rnd()<.5?-.5:0)},
+ chain(){M.fill(0);for(let i=0;i<K;i++){M[i*K+i]=-.5;M[i*K+(i+1)%K]=1;M[((i+1)%K)*K+i]=.5}},
+ saved1(){LAY='random';$('lay').value='random';Object.assign(P,{n:1050,K:5,rmax:76,force:8.4,fr:.73,beta:.29,grav:0,vmax:10,ff:1});K=5;M=Float32Array.from(SAVED);sliders()}};
+const CONF={
+ galaxy:{K:4,m:[0,1,2,1,-1,2,0,-2,1,0,2,-2,1,-1,-2,1],p:{rmax:76,force:8.1,fr:.83,beta:.23,grav:.2,vmax:5},lay:'galaxy'},
+ swim:{K:4,m:[1,2,0,-2,2,0,-1,1,0,0,0,-2,2,-1,-2,2],p:{rmax:78,force:7.6,fr:.83,beta:.38,grav:0,vmax:4},lay:'random'},
+ cell:{K:3,m:[0,0,2,1,1,-1,-1,1,1],p:{rmax:88,force:6,fr:.69,beta:.21,grav:.4},lay:'ball'},
+ collide:{K:3,m:[-2,2,-1,-1,2,1,2,0,-1],p:{rmax:72,force:5.8,fr:.74,beta:.28,grav:0},lay:'two'},
+ breath:{K:4,m:[1,2,0,-2,1,-1,2,1,2,-1,-1,2,-2,0,0,0],p:{rmax:62,force:7.5,fr:.81,beta:.23,grav:.8},lay:'ball'}};
+for(const [k,c] of Object.entries(CONF))PRE[k]=()=>{LAY=c.lay;$('lay').value=c.lay;Object.assign(P,{n:600,vth:5,vib:.3,vmax:10,ff:1},c.p,{K:c.K});K=c.K;M=Float32Array.from(c.m,v=>v/2);sliders()};
+$('lay').onchange=()=>{LAY=$('lay').value;init()};
+$('pre').onchange=()=>{const f=PRE[$('pre').value];if(f){f();matrixUI();init()}$('pre').value=''};
+$('rnd').onclick=()=>{randM();init()};
+$('mut').onclick=()=>{const v=[-1,-.5,0,.5,1];for(let m=0;m<Math.max(1,K>>1);m++){const i=(rnd()*K*K)|0,c=v.indexOf(M[i]);M[i]=v[Math.max(0,Math.min(4,c+(rnd()<.5?-1:1)))]}matrixUI()};
+$('load').onclick=()=>{const m=$('code').value.trim().match(/^(\d+):(.+)$/);if(!m)return;const k=+m[1],a=m[2].split(',').map(x=>+x/2);
+ if(k<2||k>7||a.length!==k*k||a.some(x=>!(x>=-1&&x<=1)))return;K=k;P.K=k;M=Float32Array.from(a);sliders();init()};
+const setAuto=()=>{auto=!auto;$('auto').textContent='Auto-rotate: '+(auto?'on':'off')};
+$('auto').onclick=setAuto;$('fsa').onclick=setAuto;
+const pz=()=>{paused=!paused;$('pause').textContent=$('fsp').textContent=paused?'Resume':'Pause'};
+$('pause').onclick=pz;$('fsp').onclick=pz;$('restart').onclick=init;
+function fs(on){document.body.classList.toggle('fs',on);const d=document.documentElement;
+ try{if(on&&d.requestFullscreen)d.requestFullscreen().catch(()=>{});else if(!on&&document.fullscreenElement)document.exitFullscreen()}catch(e){}}
+$('fs').onclick=()=>fs(true);$('fsx').onclick=()=>fs(false);
+document.addEventListener('fullscreenchange',()=>{if(!document.fullscreenElement)document.body.classList.remove('fs')});
+document.addEventListener('keydown',e=>{if(e.key==='Escape')fs(false)});
+let rt=0;new ResizeObserver(()=>{clearTimeout(rt);rt=setTimeout(resize,100)}).observe($('wrap'));
+resize();PRE.saved1();init();frame();
+</script>
+</body>
+</html>
